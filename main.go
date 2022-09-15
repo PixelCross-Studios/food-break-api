@@ -1,74 +1,65 @@
 package main
 
 import (
+	"log"
 	"net/http"
+	"net/url"
+	"os"
+	"time"
+
+	adapter "github.com/gwatts/gin-adapter"
+
+	jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
+	"github.com/auth0/go-jwt-middleware/v2/jwks"
+	"github.com/auth0/go-jwt-middleware/v2/validator"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 )
 
-var db = make(map[string]string)
+type Product struct {
+	ID    int     `json:"id"`
+	Title string  `json:"title"`
+	Code  string  `json:"code"`
+	Price float32 `json:"price"`
+}
 
-// test
-func setupRouter() *gin.Engine {
-	// Disable Console Color
-	// gin.DisableConsoleColor()
+func SetupRouter() *gin.Engine {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
 	r := gin.Default()
 
-	// Ping test
-	r.GET("/ping", func(c *gin.Context) {
-		c.String(http.StatusOK, "pong")
-	})
+	issuerURL, _ := url.Parse(os.Getenv("AUTH0_ISSUER_URL"))
+	audience := os.Getenv("AUTH0_AUDIENCE")
 
-	// Get user value
-	r.GET("/user/:name", func(c *gin.Context) {
-		user := c.Params.ByName("name")
-		value, ok := db[user]
-		if ok {
-			c.JSON(http.StatusOK, gin.H{"user": user, "value": value})
-		} else {
-			c.JSON(http.StatusOK, gin.H{"user": user, "status": "no value"})
+	provider := jwks.NewCachingProvider(issuerURL, time.Duration(5*time.Minute))
+
+	jwtValidator, _ := validator.New(provider.KeyFunc,
+		validator.RS256,
+		issuerURL.String(),
+		[]string{audience},
+	)
+
+	jwtMiddleware := jwtmiddleware.New(jwtValidator.ValidateToken)
+	r.Use(adapter.Wrap(jwtMiddleware.CheckJWT))
+
+	r.GET("/products", func(c *gin.Context) {
+		products := []Product{
+			{ID: 1, Title: "Product 1", Code: "p1", Price: 100.0},
+			{ID: 2, Title: "Product 2", Code: "p2", Price: 200.0},
+			{ID: 3, Title: "Product 3", Code: "p3", Price: 300.0},
 		}
-	})
-
-	// Authorized group (uses gin.BasicAuth() middleware)
-	// Same than:
-	// authorized := r.Group("/")
-	// authorized.Use(gin.BasicAuth(gin.Credentials{
-	//	  "foo":  "bar",
-	//	  "manu": "123",
-	//}))
-	authorized := r.Group("/", gin.BasicAuth(gin.Accounts{
-		"foo":  "bar", // user:foo password:bar
-		"manu": "123", // user:manu password:123
-	}))
-
-	/* example curl for /admin with basicauth header
-	   Zm9vOmJhcg== is base64("foo:bar")
-		curl -X POST \
-	  	http://localhost:8080/admin \
-	  	-H 'authorization: Basic Zm9vOmJhcg==' \
-	  	-H 'content-type: application/json' \
-	  	-d '{"value":"bar"}'
-	*/
-	authorized.POST("admin", func(c *gin.Context) {
-		user := c.MustGet(gin.AuthUserKey).(string)
-
-		// Parse JSON
-		var json struct {
-			Value string `json:"value" binding:"required"`
-		}
-
-		if c.Bind(&json) == nil {
-			db[user] = json.Value
-			c.JSON(http.StatusOK, gin.H{"status": "ok"})
-		}
+		c.JSON(http.StatusOK, products)
 	})
 
 	return r
 }
 
 func main() {
-	r := setupRouter()
+	r := SetupRouter()
 	// Listen and Server in 0.0.0.0:8080
 	r.Run(":8080")
 }
