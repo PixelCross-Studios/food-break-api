@@ -8,6 +8,7 @@ import (
 
 var db = make(map[string]string)
 
+// test
 func setupRouter() *gin.Engine {
 	// Disable Console Color
 	// gin.DisableConsoleColor()
